@@ -11,7 +11,7 @@ endif
 
 INCLUDES?=-Irustybits/target -isystem ext -Iext/prometheus-cpp-lite-1.0/core/include -Iext-prometheus-cpp-lite-1.0/3rdparty/http-client-lite/include -Iext/prometheus-cpp-lite-1.0/simpleapi/include
 DEFS?=
-LDLIBS?=
+LDLIBS?=-latomic
 DESTDIR?=
 EXTRA_DEPS?=
 

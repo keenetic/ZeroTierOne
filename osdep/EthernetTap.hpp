@@ -34,6 +34,8 @@ class EthernetTap {
 		unsigned int metric,
 		uint64_t nwid,
 		const char* friendlyName,
+		const char* feedback,
+		const char* ndmId,
 		void (*handler)(void*, void*, uint64_t, const MAC&, const MAC&, unsigned int, unsigned int, const void*, unsigned int),
 		void* arg);
 

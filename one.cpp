@@ -1761,24 +1761,28 @@ static void _recursiveChown(const char* path, uid_t uid, gid_t gid)
 	closedir(d);
 }
 
-static void dropPrivileges(const char* procName, const std::string& homeDir)
+static void dropPrivileges(const char* procName, const std::string& homeDir, const std::string& systemUser)
 {
 	if (getuid() != 0)
 		return;
 
 	// dropPrivileges switches to zerotier-one user while retaining CAP_NET_ADMIN
 	// and CAP_NET_RAW capabilities.
-	struct passwd* targetUser = getpwnam(ZT_LINUX_USER);
-	if (! targetUser)
+	struct passwd* targetUser = getpwnam(systemUser.c_str());
+	if (! targetUser) {
+		fprintf(stderr, "unable to find user %s", systemUser.c_str());
 		return;
+	}
 
 	if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_IS_SET, CAP_NET_RAW, 0, 0) < 0) {
 		// Kernel has no support for ambient capabilities.
 		_notDropping(procName, homeDir);
+		fprintf(stderr, "unable to prctl()");
 		return;
 	}
 	if (prctl(PR_SET_SECUREBITS, SECBIT_KEEP_CAPS | SECBIT_NOROOT) < 0) {
 		_notDropping(procName, homeDir);
+		fprintf(stderr, "unable to prctl()");
 		return;
 	}
 
@@ -1787,6 +1791,7 @@ static void dropPrivileges(const char* procName, const std::string& homeDir)
 
 	if (_setCapabilities((1 << CAP_NET_ADMIN) | (1 << CAP_NET_RAW) | (1 << CAP_SETUID) | (1 << CAP_SETGID) | (1 << CAP_NET_BIND_SERVICE)) < 0) {
 		_notDropping(procName, homeDir);
+		fprintf(stderr, "unable to setcaps()");
 		return;
 	}
 
@@ -2040,14 +2045,14 @@ static void printHelp(const char* cn, FILE* out)
 
 class _OneServiceRunner {
   public:
-	_OneServiceRunner(const char* pn, const std::string& hd, unsigned int p) : progname(pn), returnValue(0), port(p), homeDir(hd)
+	_OneServiceRunner(const char* pn, const std::string& hd, unsigned int p, const std::string& fb,const std::string& nid, unsigned long mark) : progname(pn), returnValue(0), port(p), homeDir(hd), feedback(fb), ndmId(nid), mark(mark)
 	{
 	}
 	void threadMain() throw()
 	{
 		try {
 			for (;;) {
-				zt1Service = OneService::newInstance(homeDir.c_str(), port);
+				zt1Service = OneService::newInstance(homeDir.c_str(), port, feedback.c_str(), ndmId.c_str(), mark);
 				switch (zt1Service->run()) {
 					case OneService::ONE_STILL_RUNNING:	  // shouldn't happen, run() won't return until done
 					case OneService::ONE_NORMAL_TERMINATION:
@@ -2084,6 +2089,9 @@ class _OneServiceRunner {
 	unsigned int returnValue;
 	unsigned int port;
 	const std::string& homeDir;
+	const std::string& feedback;
+	const std::string& ndmId;
+	unsigned long mark;
 };
 
 #ifdef __WINDOWS__
@@ -2167,6 +2175,10 @@ int main(int argc, char** argv)
 		return cli(argc, argv);
 
 	std::string homeDir;
+	std::string feedback;
+	std::string ndmId;
+	std::string systemUser;
+	unsigned long mark = 0;
 	unsigned int port = ZT_DEFAULT_PORT;
 	bool skipRootCheck = false;
 
@@ -2179,6 +2191,22 @@ int main(int argc, char** argv)
 						printHelp(argv[0], stdout);
 						return 1;
 					}
+					break;
+
+				case 'F': // feedback
+					feedback = argv[i] + 2;
+					break;
+
+				case 'N': // ndm ID
+					ndmId = argv[i] + 2;
+					break;
+
+				case 'u': // ndm ID
+					systemUser = argv[i] + 2;
+					break;
+
+				case 'M': // socket mark
+					mark = Utils::strToULong(argv[i] + 2);
 					break;
 
 #ifdef __UNIX_LIKE__
@@ -2377,7 +2405,7 @@ int main(int argc, char** argv)
 #ifdef __UNIX_LIKE__
 #ifdef ZT_HAVE_DROP_PRIVILEGES
 	if (! skipRootCheck)
-		dropPrivileges(argv[0], homeDir);
+		dropPrivileges(argv[0], homeDir, systemUser);
 #endif
 
 	std::string pidPath(homeDir + ZT_PATH_SEPARATOR_S + ZT_PID_PATH);
@@ -2400,7 +2428,7 @@ int main(int argc, char** argv)
 	ExtOsdep::init(extosdepFd1, extosdepFd2);
 #endif
 
-	_OneServiceRunner thr(argv[0], homeDir, port);
+	_OneServiceRunner thr(argv[0], homeDir, port, feedback, ndmId, mark);
 	thr.threadMain();
 	// Thread::join(Thread::start(&thr));
 

@@ -36,6 +36,8 @@ class LinuxEthernetTap : public EthernetTap {
 		unsigned int metric,
 		uint64_t nwid,
 		const char* friendlyName,
+		const char* feedback,
+		const char* ndmId,
 		void (*handler)(void*, void*, uint64_t, const MAC&, const MAC&, unsigned int, unsigned int, const void*, unsigned int),
 		void* arg);
 
@@ -64,6 +66,8 @@ class LinuxEthernetTap : public EthernetTap {
 	MAC _mac;
 	std::string _homePath;
 	std::string _dev;
+	std::string _feedback;
+	std::string _ndmId;
 	std::vector<MulticastGroup> _multicastGroups;
 	unsigned int _mtu;
 	int _fd;

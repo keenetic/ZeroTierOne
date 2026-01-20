@@ -63,6 +63,8 @@ std::shared_ptr<EthernetTap> EthernetTap::newInstance(
 	unsigned int metric,
 	uint64_t nwid,
 	const char* friendlyName,
+	const char* feedback,
+	const char* ndmId,
 	void (*handler)(void*, void*, uint64_t, const MAC&, const MAC&, unsigned int, unsigned int, const void*, unsigned int),
 	void* arg)
 {
@@ -95,7 +97,7 @@ std::shared_ptr<EthernetTap> EthernetTap::newInstance(
 #ifdef ZT_EXTOSDEP
 	return std::shared_ptr<EthernetTap>(new ExtOsdepTap(homePath, mac, mtu, metric, nwid, friendlyName, handler, arg));
 #else
-	return std::shared_ptr<EthernetTap>(new LinuxEthernetTap(homePath, concurrency, pinning, mac, mtu, metric, nwid, friendlyName, handler, arg));
+	return std::shared_ptr<EthernetTap>(new LinuxEthernetTap(homePath, concurrency, pinning, mac, mtu, metric, nwid, friendlyName, feedback, ndmId, handler, arg));
 #endif	 // ZT_EXTOSDEP
 #endif	 // __LINUX__
 

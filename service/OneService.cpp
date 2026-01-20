@@ -97,6 +97,9 @@ namespace sdkresource = opentelemetry::v1::sdk::resource;
 #include <unistd.h>
 #endif
 
+#include <ndm/feedback.h>
+#define NESEP_						NDM_FEEDBACK_ENV_SEPARATOR
+
 #ifdef __APPLE__
 #include "../osdep/MacDNSHelper.hpp"
 #elif defined(__WINDOWS__)
@@ -824,6 +827,9 @@ class OneServiceImpl : public OneService {
 	const std::string _networksPath;
 	const std::string _moonsPath;
 
+	const std::string _feedback;
+	const std::string _ndmId;
+
 	EmbeddedNetworkController* _controller;
 	Phy<OneServiceImpl*> _phy;
 	Node* _node;
@@ -853,6 +859,7 @@ class OneServiceImpl : public OneService {
 	unsigned int _secondaryPort;
 	unsigned int _tertiaryPort;
 	volatile unsigned int _udpPortPickerCounter;
+	unsigned long _mark;
 
 	// Local configuration and memo-ized information from it
 	json _localConfig;
@@ -938,11 +945,13 @@ class OneServiceImpl : public OneService {
 
 	// end member variables ----------------------------------------------------
 
-	OneServiceImpl(const char* hp, unsigned int port)
+	OneServiceImpl(const char* hp, unsigned int port, const char* feedback, const char* ndmId, unsigned long mark)
 		: _homePath((hp) ? hp : ".")
 		, _controllerDbPath(_homePath + ZT_PATH_SEPARATOR_S "controller.d")
 		, _networksPath(_homePath + ZT_PATH_SEPARATOR_S "networks.d")
 		, _moonsPath(_homePath + ZT_PATH_SEPARATOR_S "moons.d")
+		, _feedback(feedback)
+		, _ndmId(ndmId)
 		, _controller((EmbeddedNetworkController*)0)
 		, _phy(this, false, true)
 		, _node((Node*)0)
@@ -956,6 +965,7 @@ class OneServiceImpl : public OneService {
 		, _forceTcpRelay(false)
 		, _primaryPort(port)
 		, _udpPortPickerCounter(0)
+		, _mark(mark)
 		, _lastDirectReceiveFromGlobal(0)
 #ifdef ZT_TCP_FALLBACK_RELAY
 		, _fallbackRelayAddress(ZT_TCP_FALLBACK_RELAY)
@@ -1123,7 +1133,25 @@ class OneServiceImpl : public OneService {
 						OSUtils::lockDownFile(authTokenPath.c_str(), false);
 					}
 				}
+
 				_authToken = _trimString(_authToken);
+
+				{
+					const char *args[] =
+					{
+						_feedback.c_str(),
+						"authtoken",
+						_authToken.c_str(),
+						NULL
+					};
+
+					if( !ndm_feedback(NDM_FEEDBACK_TIMEOUT_MSEC, args, "%s=%s",
+							"id", _ndmId.c_str()) ) {
+						_termReason = ONE_UNRECOVERABLE_ERROR;
+						_fatalErrorMessage = "authtoken.secret could not be sent";
+						return _termReason;
+					}
+				}
 			}
 
 			{
@@ -1205,6 +1233,23 @@ class OneServiceImpl : public OneService {
 			char portstr[64];
 			OSUtils::ztsnprintf(portstr, sizeof(portstr), "%u", _ports[0]);
 			OSUtils::writeFile((_homePath + ZT_PATH_SEPARATOR_S "zerotier-one.port").c_str(), std::string(portstr));
+
+			{
+				const char *args[] =
+				{
+					_feedback.c_str(),
+					"rpcport",
+					portstr,
+					NULL
+				};
+
+				if( !ndm_feedback(NDM_FEEDBACK_TIMEOUT_MSEC, args, "%s=%s",
+						"id", _ndmId.c_str()) ) {
+					_termReason = ONE_UNRECOVERABLE_ERROR;
+					_fatalErrorMessage = "port could not be sent";
+					return _termReason;
+				}
+			}
 
 			// Attempt to bind to a secondary port.
 			// This exists because there are buggy NATs out there that fail if more
@@ -3164,7 +3209,7 @@ class OneServiceImpl : public OneService {
 #ifndef ZT_SDK
 				SharedPtr<ManagedRoute>& mr = n.managedRoutes()[*target];
 				if (! mr)
-					mr.set(new ManagedRoute(*target, *via, *src, tapdev.c_str()));
+					mr.set(new ManagedRoute(*target, *via, *src, tapdev.c_str(), _ndmId.c_str(), _feedback.c_str()));
 #endif
 			}
 
@@ -3530,7 +3575,7 @@ class OneServiceImpl : public OneService {
 						char friendlyName[128];
 						OSUtils::ztsnprintf(friendlyName, sizeof(friendlyName), "ZeroTier One [%.16llx]", nwid);
 
-						n.setTap(EthernetTap::newInstance(nullptr, _concurrency, _cpuPinningEnabled, _homePath.c_str(), MAC(nwc->mac), nwc->mtu, (unsigned int)ZT_IF_METRIC, nwid, friendlyName, StapFrameHandler, (void*)this));
+						n.setTap(EthernetTap::newInstance(nullptr, _concurrency, _cpuPinningEnabled, _homePath.c_str(), MAC(nwc->mac), nwc->mtu, (unsigned int)ZT_IF_METRIC, nwid, friendlyName, _feedback.c_str(), _ndmId.c_str(), StapFrameHandler, (void*)this));
 						*nuptr = (void*)&n;
 
 						char nlcpath[256];
@@ -3593,6 +3638,40 @@ class OneServiceImpl : public OneService {
 
 			case ZT_VIRTUAL_NETWORK_CONFIG_OPERATION_CONFIG_UPDATE:
 				n.setConfig(nwc);
+
+				{
+					const char* nstatus = "";
+
+					switch(n.config().status) {
+						case ZT_NETWORK_STATUS_REQUESTING_CONFIGURATION: nstatus = "REQUESTING_CONFIGURATION"; break;
+						case ZT_NETWORK_STATUS_OK:                       nstatus = "OK"; break;
+						case ZT_NETWORK_STATUS_ACCESS_DENIED:            nstatus = "ACCESS_DENIED"; break;
+						case ZT_NETWORK_STATUS_NOT_FOUND:                nstatus = "NOT_FOUND"; break;
+						case ZT_NETWORK_STATUS_PORT_ERROR:               nstatus = "PORT_ERROR"; break;
+						case ZT_NETWORK_STATUS_CLIENT_TOO_OLD:           nstatus = "CLIENT_TOO_OLD"; break;
+						case ZT_NETWORK_STATUS_AUTHENTICATION_REQUIRED:  nstatus = "AUTHENTICATION_REQUIRED"; break;
+					}
+
+					char tmp[256];
+
+					OSUtils::ztsnprintf(tmp,sizeof(tmp),"%.16llx",n.config().nwid);
+
+					const char* args[] =
+					{
+						_feedback.c_str(),
+						"status",
+						nstatus,
+						NULL
+					};
+
+					if( !ndm_feedback(NDM_FEEDBACK_TIMEOUT_MSEC, args,
+							"%s=%s" NESEP_
+							"%s=%s",
+							"id", _ndmId.c_str(),
+							"network_id", tmp) ) {
+						return -999;
+					}
+				}
 
 				if (n.tap()) {	 // sanity check
 #if defined(__WINDOWS__) && ! defined(ZT_SDK)
@@ -4388,9 +4467,9 @@ std::string OneService::platformDefaultHomePath()
 	return OSUtils::platformDefaultHomePath();
 }
 
-OneService* OneService::newInstance(const char* hp, unsigned int port)
+OneService* OneService::newInstance(const char* hp, unsigned int port, const char* feedback,const char* ndmId, unsigned long mark)
 {
-	return new OneServiceImpl(hp, port);
+	return new OneServiceImpl(hp, port, feedback, ndmId, mark);
 }
 OneService::~OneService()
 {

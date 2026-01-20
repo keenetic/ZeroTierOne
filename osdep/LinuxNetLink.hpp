@@ -95,8 +95,8 @@ class LinuxNetLink {
 	LinuxNetLink(LinuxNetLink const&) = delete;
 	void operator=(LinuxNetLink const&) = delete;
 
-	void addRoute(const InetAddress& target, const InetAddress& via, const InetAddress& src, const char* ifaceName);
-	void delRoute(const InetAddress& target, const InetAddress& via, const InetAddress& src, const char* ifaceName);
+	void addRoute(const InetAddress& target, const InetAddress& via, const InetAddress& src, const char* ifaceName, const char* id, const char* feedback);
+	void delRoute(const InetAddress& target, const InetAddress& via, const InetAddress& src, const char* ifaceName, const char* id, const char* feedback);
 
 	void addAddress(const InetAddress& addr, const char* iface);
 	void removeAddress(const InetAddress& addr, const char* iface);
